@@ -1,8 +1,3 @@
-use std::vec::Vec;
-use std::mem::swap;
-
-type Key = [u8; 4];
-
 const NUM_SBOXES: usize = 5;
 const SBOX_LENGTH: usize = 256;
 const PBOX_LEGNTH: usize = 32;
@@ -26,8 +21,7 @@ static ISBOXES: [[u8; SBOX_LENGTH]; NUM_SBOXES] = [
 static PBOX: [usize; PBOX_LEGNTH] = [15, 6, 19, 20, 28, 11, 27, 16, 0, 14, 22, 25, 4, 17, 30, 9, 1, 7, 23, 13, 31, 26, 2, 8, 18, 12, 29, 5, 21, 10, 3, 24];
 static IPBOX: [usize; PBOX_LEGNTH] = [8, 16, 22, 30, 12, 27, 1, 17, 23, 15, 29, 5, 25, 19, 9, 0, 7, 13, 24, 2, 3, 28, 10, 18, 31, 11, 21, 6, 4, 26, 14, 20];
 
-pub fn encrypt(plaintext: &mut Vec<u8>, key: i32) {
-	let key = itoba(key);
+pub fn encrypt(plaintext: &mut Vec<u8>, key: u32) {
 	let encrypt_block = if shift_type(key) == 0 {
 		encrypt_block_left
 	} else {
@@ -41,12 +35,16 @@ pub fn encrypt(plaintext: &mut Vec<u8>, key: i32) {
 		} else {
 			plaintext.len() - 1
 		};
-		encrypt_block(&mut plaintext[bottom..top], sbox_index, key, shift);
+		let mut block = batoi(&plaintext[bottom..top]);
+		encrypt_block(&mut block, sbox_index, key, shift);
+		let mut block = itoba(block);
+		for i in 0..top - bottom {
+			unsafe{*plaintext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
+		}
 	}
 }
 
-pub fn decrypt(ciphertext: &mut Vec<u8>, key: i32) {
-	let key = itoba(key);
+pub fn decrypt(ciphertext: &mut Vec<u8>, key: u32) {
 	let decrypt_block = if shift_type(key) == 1 {
 		decrypt_block_left
 	} else {
@@ -60,100 +58,83 @@ pub fn decrypt(ciphertext: &mut Vec<u8>, key: i32) {
 		} else {
 			ciphertext.len() - 1
 		};
-		decrypt_block(&mut ciphertext[bottom..top], sbox_index, key, shift);
+		let mut block = batoi(&ciphertext[bottom..top]);
+		decrypt_block(&mut block, sbox_index, key, shift);
+		let mut block = itoba(block);
+		for i in 0..top - bottom {
+			unsafe{*ciphertext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
+		}
 	}
 }
 
-fn encrypt_block_left(block: &mut[u8], sbox_index: usize, key: Key, shift: usize) {
+fn encrypt_block_left(block: &mut u32, sbox_index: usize, key: u32, shift: usize) {
 	substitute(block, unsafe{*SBOXES.get_unchecked(sbox_index)});
 	shift_left(block, shift);
 	permute(block, PBOX);
 	xor_block(block, key);
 }
 
-fn encrypt_block_right(block: &mut[u8], sbox_index: usize, key: Key, shift: usize) {
+fn encrypt_block_right(block: &mut u32, sbox_index: usize, key: u32, shift: usize) {
 	substitute(block, unsafe{*SBOXES.get_unchecked(sbox_index)});
 	shift_right(block, shift);
 	permute(block, PBOX);
 	xor_block(block, key);
 }
 
-fn decrypt_block_left(block: &mut[u8], sbox_index: usize, key: Key, shift: usize) {
+fn decrypt_block_left(block: &mut u32, sbox_index: usize, key: u32, shift: usize) {
 	xor_block(block, key);
 	permute(block, IPBOX);
 	shift_left(block, shift);
 	substitute(block, unsafe{*ISBOXES.get_unchecked(sbox_index)});
 }
 
-fn decrypt_block_right(block: &mut[u8], sbox_index: usize, key: Key, shift: usize) {
+fn decrypt_block_right(block: &mut u32, sbox_index: usize, key: u32, shift: usize) {
 	xor_block(block, key);
 	permute(block, IPBOX);
 	shift_right(block, shift);
 	substitute(block, unsafe{*ISBOXES.get_unchecked(sbox_index)});
 }
 
-fn substitute(block: &mut[u8], sub_box: [u8; SBOX_LENGTH]) {
-	for index in 0..block.len() {
-		let val = unsafe{block.get_unchecked_mut(index)};
-		*val = sub_box[*val as usize];
-	}
+fn substitute(block: &mut u32, sub_box: [u8; SBOX_LENGTH]) {
+	for i in 0..4 {
+        let index = 24 - i*8;
+        let val = unsafe{*sub_box.get_unchecked(((*block >> index) & 0xff) as usize)} as u32;
+        *block = (*block & ((0xff << index) ^ 0xffffffff)) | (val << index);
+    }
 }
 
-fn permute(block: &mut [u8], b: [usize; PBOX_LEGNTH]) {
-	let original = batoi(block);
+fn permute(block: &mut u32, sub_box: [usize; PBOX_LEGNTH]) {
 	let mut permute: u32 = 0;
 	for i in 0..PBOX_LEGNTH {
-		let p = (original >> (31 - b[i])) & 1;
+		let p = (*block >> (31 - unsafe{sub_box.get_unchecked(i)})) & 1;
 		permute |= p << (31 - i);
 	}
-	for i in 0..block.len() {
-		unsafe{*block.get_unchecked_mut(i) = (permute >> (24 - i*8) & 0xff) as u8;}
-	}
+	*block = permute;
 }
 
-fn xor_block(block: &mut [u8], key: Key) {
-	for i in 0..block.len() {
-		unsafe{*block.get_unchecked_mut(i) = *block.get_unchecked(i) ^ *key.get_unchecked(i);}
-	}
+fn xor_block(block: &mut u32, key: u32) {
+	*block ^= key;
 }
 
-fn shift_left(block: &mut[u8], num: usize) {
-	match block.len() {
-		0 => (),
-		1 => (),
-		2 => block.reverse(),
-		length => {
-			let num = num % length;
-			block[..num].reverse();
-			block[num..].reverse();
-			block.reverse();
-		}
-	}
+fn shift_right(block: &mut u32, count: usize) {
+	*block = *block << (32 - count) | *block >> count;
 }
 
-fn shift_right(block: &mut[u8], num: usize) {
-	match block.len() {
-		0 => (),
-		1 => (),
-		2 => block.reverse(),
-		length => {
-			let num = num % length;
-			block.reverse();
-			block[..num].reverse();
-			block[num..].reverse();
-		}
-	}
+fn shift_left(block: &mut u32, count: usize) {
+	*block = *block << count | *block >> (32 - count);
 }
 
-fn shift_type(key: Key) -> u8 {
-	key[3] & 1
+// value<<count | value>>(32-count);
+
+fn shift_type(key: u32) -> u8 {
+	(key >> 8 & 1) as u8
 }
 
-fn shift_num(key: Key) -> u8 {
-	(key[3] >> 1) & 31
+fn shift_num(key: u32) -> u8 {
+	(key >> 8 & 31) as u8
 }
 
-fn itoba(i: i32) -> Key {
+fn itoba(i: u32) -> [u8; 4] {
 	[
 	((i >> 24)) as u8,
 	((i >> 16) & 0xff) as u8,
@@ -175,155 +156,194 @@ mod tests {
 	use std::fs;
 
 	#[test]
-	fn test_shift_left_() {
-		let mut data = vec![1,2,3,4];
-		let once = vec![2,3,4,1];
-		let twice = vec![3,4,1,2];
-		let thrice = vec![4,1,2,3];
-		let fource = vec![1,2,3,4];
-    	shift_left(&mut data[..], 1);
-    	assert_eq!(data, once);
-    	shift_left(&mut data[..], 1);
-    	assert_eq!(data, twice);
-    	shift_left(&mut data[..], 1);
-    	assert_eq!(data, thrice);
-    	shift_left(&mut data[..], 1);
-    	assert_eq!(data, fource);
+	fn permute_test() {
+	    let mut block: u32 = 0b11100;
+	    permute(&mut block, PBOX);
+	    assert_ne!(block, 0b11100);
+	    permute(&mut block, IPBOX);
+	    assert_eq!(block, 0b11100);
+	}
 
-		shift_left(&mut data[..], 2);
-    	assert_eq!(data, twice);
-    	shift_left(&mut data[..], 2);
-    	assert_eq!(data, fource);
+	#[test]
+	fn shift_right_test() {
+		let mut v = 0b10010110;
+        shift_right(&mut v, 2);
+        assert_eq!(v, 0b10000000000000000000000000100101);
+        shift_right(&mut v, 32 - 2);
+        assert_eq!(v, 0b10010110);
+	}
 
-		shift_left(&mut data[..], 3);
-    	assert_eq!(data, thrice);
-    	shift_left(&mut data[..], 1);
-    	assert_eq!(data, fource);
+	#[test]
+	fn shift_left_test() {
+		let mut v = 0b10010110;
+        shift_left(&mut v, 26);
+        assert_eq!(v, 0b01011000000000000000000000000010);
+        shift_left(&mut v, 32 - 26);
+        assert_eq!(v, 0b10010110);
+	}
 
-    	shift_left(&mut data[..], 4);
-    	assert_eq!(data, fource);
+	// #[test]
+	// fn test_shift_left_() {
+	// 	let mut data = vec![1,2,3,4];
+	// 	let once = vec![2,3,4,1];
+	// 	let twice = vec![3,4,1,2];
+	// 	let thrice = vec![4,1,2,3];
+	// 	let fource = vec![1,2,3,4];
+ //    	shift_left(&mut data[..], 1);
+ //    	assert_eq!(data, once);
+ //    	shift_left(&mut data[..], 1);
+ //    	assert_eq!(data, twice);
+ //    	shift_left(&mut data[..], 1);
+ //    	assert_eq!(data, thrice);
+ //    	shift_left(&mut data[..], 1);
+ //    	assert_eq!(data, fource);
+
+	// 	shift_left(&mut data[..], 2);
+ //    	assert_eq!(data, twice);
+ //    	shift_left(&mut data[..], 2);
+ //    	assert_eq!(data, fource);
+
+	// 	shift_left(&mut data[..], 3);
+ //    	assert_eq!(data, thrice);
+ //    	shift_left(&mut data[..], 1);
+ //    	assert_eq!(data, fource);
+
+ //    	shift_left(&mut data[..], 4);
+ //    	assert_eq!(data, fource);
 		
-		shift_left(&mut data[..], 5);
-    	assert_eq!(data, once);
-    	shift_left(&mut data[..], 3);
-    	assert_eq!(data, fource);
+	// 	shift_left(&mut data[..], 5);
+ //    	assert_eq!(data, once);
+ //    	// shift_left(&mut data[..], 3);
+ //    	// assert_eq!(data, fource);
 
-	}
+	// }
+
+	// #[test]
+	// fn test_shift_left_empty() {
+	// 	let mut data = vec![];
+	// 	shift_left(&mut data[..], 1);
+	// 	assert_eq!(data, vec![]);
+	// }
+
+	// #[test]
+	// fn test_shift_left_one() {
+	//     let mut data = vec![1];
+	// 	shift_left(&mut data[..], 1);
+	// 	assert_eq!(data, vec![1]);
+	// }
+
+	// #[test]
+	// fn test_shift_left_two() {
+	//     let mut data = vec![1, 2];
+	// 	shift_left(&mut data[..], 1);
+	// 	assert_eq!(data, vec![2, 1]);
+	// }
+
+	// #[test]
+	// fn test_shift_left_three() {
+	//     let mut data = vec![1, 2, 3];
+	// 	shift_left(&mut data[..], 1);
+	// 	assert_eq!(data, vec![2, 3, 1]);
+	// }
+
+	// #[test]
+	// fn test_shift_right_() {
+	// 	let mut data = vec![1, 2, 3, 4];
+	// 	let once = vec![4, 1, 2, 3];
+	// 	let twice = vec![3, 4 ,1, 2];
+	// 	let thrice = vec![2, 3, 4, 1];
+	// 	let fource = vec![1, 2, 3, 4];
+ //    	shift_right(&mut data[..], 1);
+ //    	assert_eq!(data, once);
+ //    	shift_right(&mut data[..], 1);
+ //    	assert_eq!(data, twice);
+ //    	shift_right(&mut data[..], 1);
+ //    	assert_eq!(data, thrice);
+ //    	shift_right(&mut data[..], 1);
+ //    	assert_eq!(data, fource);
+
+	//     shift_right(&mut data[..], 2);
+ //    	assert_eq!(data, twice);
+ //    	shift_right(&mut data[..], 2);
+ //    	assert_eq!(data, fource);
+
+ //    	shift_right(&mut data[..], 3);
+ //    	assert_eq!(data, thrice);
+ //    	shift_right(&mut data[..], 1);
+ //    	assert_eq!(data, fource);
+
+ //    	shift_right(&mut data[..], 4);
+ //    	assert_eq!(data, fource);
+
+ //    	shift_right(&mut data[..], 5);
+ //    	assert_eq!(data, once); 	
+	// }
+
+	// #[test]
+	// fn test_shift_right_empty() {
+	// 	let mut data = vec![];
+	// 	shift_right(&mut data[..], 1);
+	// 	assert_eq!(data, vec![]);
+	// }
+
+	// #[test]
+	// fn test_shift_right_one() {
+	//     let mut data = vec![1];
+	// 	shift_right(&mut data[..], 1);
+	// 	assert_eq!(data, vec![1]);
+	// }
+
+	// #[test]
+	// fn test_shift_right_two() {
+	//     let mut data = vec![1, 2];
+	// 	shift_right(&mut data[..], 1);
+	// 	assert_eq!(data, vec![2, 1]);
+	// }
+
+	// #[test]
+	// fn test_shift_right_three() {
+	//     let mut data = vec![1, 2, 3];
+	// 	shift_right(&mut data[..], 1);
+	// 	assert_eq!(data, vec![3, 1, 2]);
+	// }
+
+	// #[test]
+	// fn test_permute() {
+	// 	let original: [u8; 4] = [0b11010101, 0b10100100, 0b00100000, 0b10100001];
+	// 	let want: [u8; 4] = [0b00000000, 0b10000000, 0b11011101, 0b10010111];
+	// 	let mut got = original.clone();
+	// 	permute(&mut got[..], PBOX);
+	// 	assert_eq!(want, got);
+	// }
+
+	// #[test]
+	// fn test_batoi() {
+	//     let ba = vec![0b11010101, 0b10100100, 0b00100000, 0b10100001];
+	//     let got = batoi(&ba[..]);
+	//     assert_eq!(got, 0b11010101101001000010000010100001 as u32);
+	// }
+
+	// #[test]
+	// fn test_xor() {
+	// 	let key = itoba(6208907);
+	//     let plaintext: [u8; 4] = [43, 197, 16, 237];
+	//     let mut ciphertext = plaintext.clone();
+ //    	xor_block(&mut ciphertext[..], key);
+ //    	assert_ne!(ciphertext, plaintext);
+ //    	xor_block(&mut ciphertext[..], key);
+ //    	assert_eq!(ciphertext, plaintext);
+	// }
 
 	#[test]
-	fn test_shift_left_empty() {
-		let mut data = vec![];
-		shift_left(&mut data[..], 1);
-		assert_eq!(data, vec![]);
-	}
-
-	#[test]
-	fn test_shift_left_one() {
-	    let mut data = vec![1];
-		shift_left(&mut data[..], 1);
-		assert_eq!(data, vec![1]);
-	}
-
-	#[test]
-	fn test_shift_left_two() {
-	    let mut data = vec![1, 2];
-		shift_left(&mut data[..], 1);
-		assert_eq!(data, vec![2, 1]);
-	}
-
-	#[test]
-	fn test_shift_left_three() {
-	    let mut data = vec![1, 2, 3];
-		shift_left(&mut data[..], 1);
-		assert_eq!(data, vec![2, 3, 1]);
-	}
-
-	#[test]
-	fn test_shift_right_() {
-		let mut data = vec![1, 2, 3, 4];
-		let once = vec![4, 1, 2, 3];
-		let twice = vec![3, 4 ,1, 2];
-		let thrice = vec![2, 3, 4, 1];
-		let fource = vec![1, 2, 3, 4];
-    	shift_right(&mut data[..], 1);
-    	assert_eq!(data, once);
-    	shift_right(&mut data[..], 1);
-    	assert_eq!(data, twice);
-    	shift_right(&mut data[..], 1);
-    	assert_eq!(data, thrice);
-    	shift_right(&mut data[..], 1);
-    	assert_eq!(data, fource);
-
-	    shift_right(&mut data[..], 2);
-    	assert_eq!(data, twice);
-    	shift_right(&mut data[..], 2);
-    	assert_eq!(data, fource);
-
-    	shift_right(&mut data[..], 3);
-    	assert_eq!(data, thrice);
-    	shift_right(&mut data[..], 1);
-    	assert_eq!(data, fource);
-
-    	shift_right(&mut data[..], 4);
-    	assert_eq!(data, fource);
-
-    	shift_right(&mut data[..], 5);
-    	assert_eq!(data, once); 	
-	}
-
-	#[test]
-	fn test_shift_right_empty() {
-		let mut data = vec![];
-		shift_right(&mut data[..], 1);
-		assert_eq!(data, vec![]);
-	}
-
-	#[test]
-	fn test_shift_right_one() {
-	    let mut data = vec![1];
-		shift_right(&mut data[..], 1);
-		assert_eq!(data, vec![1]);
-	}
-
-	#[test]
-	fn test_shift_right_two() {
-	    let mut data = vec![1, 2];
-		shift_right(&mut data[..], 1);
-		assert_eq!(data, vec![2, 1]);
-	}
-
-	#[test]
-	fn test_shift_right_three() {
-	    let mut data = vec![1, 2, 3];
-		shift_right(&mut data[..], 1);
-		assert_eq!(data, vec![3, 1, 2]);
-	}
-
-	#[test]
-	fn test_permute() {
-		let original: [u8; 4] = [0b11010101, 0b10100100, 0b00100000, 0b10100001];
-		let want: [u8; 4] = [0b00000000, 0b10000000, 0b11011101, 0b10010111];
-		let mut got = original.clone();
-		permute(&mut got[..], PBOX);
-		assert_eq!(want, got);
-	}
-
-	#[test]
-	fn test_batoi() {
-	    let ba = vec![0b11010101, 0b10100100, 0b00100000, 0b10100001];
-	    let got = batoi(&ba[..]);
-	    assert_eq!(got, 0b11010101101001000010000010100001 as u32);
-	}
-
-	#[test]
-	fn test_xor() {
-		let key = itoba(6208907);
-	    let plaintext: [u8; 4] = [43, 197, 16, 237];
-	    let mut ciphertext = plaintext.clone();
-    	xor_block(&mut ciphertext[..], key);
-    	assert_ne!(ciphertext, plaintext);
-    	xor_block(&mut ciphertext[..], key);
-    	assert_eq!(ciphertext, plaintext);
+	fn test_substitution() {
+	    let mut data = 1234;
+	    let original = data;
+	    for sbox in 0..NUM_SBOXES {
+	    	substitute(&mut data, SBOXES[sbox]);
+		    assert_ne!(data, original);
+		    substitute(&mut data, ISBOXES[sbox]);
+		    assert_eq!(data, original);	
+	    }
 	}
 
 	#[test]
