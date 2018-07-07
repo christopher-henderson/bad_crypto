@@ -28,19 +28,28 @@ pub fn encrypt(plaintext: &mut Vec<u8>, key: u32) {
 		encrypt_block_right
 	};
 	let shift = shift_num(key) as usize;
-	for bottom in (0..plaintext.len()).step_by(4) {
+	for bottom in (0..plaintext.len() - plaintext.len() % 4).step_by(4) {
 		let sbox_index = bottom / 4 % NUM_SBOXES;
-		let top = if bottom + 4 < plaintext.len() {
-			bottom + 4
-		} else {
-			plaintext.len() - 1
-		};
+		let top = bottom + 4;
 		let mut block = batoi(&plaintext[bottom..top]);
 		encrypt_block(&mut block, sbox_index, key, shift);
-		let mut block = itoba(block);
-		for i in 0..top - bottom {
+		let block = itoba(block);
+		for i in 0..4{
 			unsafe{*plaintext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 		}
+	}
+	let leftover = plaintext.len() % 4;
+	if leftover == 0 {
+		return;
+	}
+	let bottom =  plaintext.len() - leftover;
+	let sbox_index = bottom / 4 % NUM_SBOXES;
+	let top = plaintext.len() - 1;
+	let mut block = batoi(&plaintext[bottom..top]);
+	encrypt_block(&mut block, sbox_index, key, shift);
+	let block = itoba(block);
+	for i in 0..top - bottom {
+		unsafe{*plaintext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 	}
 }
 
@@ -61,7 +70,7 @@ pub fn decrypt(ciphertext: &mut Vec<u8>, key: u32) {
 		let mut block = batoi(&ciphertext[bottom..top]);
 		decrypt_block(&mut block, sbox_index, key, shift);
 		let mut block = itoba(block);
-		for i in 0..top - bottom {
+		for i in 0.. top - bottom {
 			unsafe{*ciphertext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 		}
 	}
