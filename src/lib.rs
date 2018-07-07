@@ -28,9 +28,10 @@ pub fn encrypt(plaintext: &mut Vec<u8>, key: u32) {
 		encrypt_block_right
 	};
 	let shift = shift_num(key) as usize;
+	let mut top = 0;
 	for bottom in (0..plaintext.len() - plaintext.len() % 4).step_by(4) {
 		let sbox_index = bottom / 4 % NUM_SBOXES;
-		let top = bottom + 4;
+		top = bottom + 4;
 		let mut block = batoi(&plaintext[bottom..top]);
 		encrypt_block(&mut block, sbox_index, key, shift);
 		let block = itoba(block);
@@ -38,13 +39,12 @@ pub fn encrypt(plaintext: &mut Vec<u8>, key: u32) {
 			unsafe{*plaintext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 		}
 	}
-	let leftover = plaintext.len() % 4;
-	if leftover == 0 {
+	if plaintext.len() - top == 0 {
 		return;
 	}
-	let bottom =  plaintext.len() - leftover;
+	let bottom = top;
 	let sbox_index = bottom / 4 % NUM_SBOXES;
-	let top = plaintext.len() - 1;
+	let top = plaintext.len();
 	let mut block = batoi(&plaintext[bottom..top]);
 	encrypt_block(&mut block, sbox_index, key, shift);
 	let block = itoba(block);
@@ -60,26 +60,27 @@ pub fn decrypt(ciphertext: &mut Vec<u8>, key: u32) {
 		decrypt_block_right
 	};
 	let shift = shift_num(key) as usize;
+	let mut top = 0;
 	for bottom in (0..ciphertext.len() - ciphertext.len() % 4).step_by(4) {
 		let sbox_index = bottom / 4 % NUM_SBOXES;
-		let top = bottom + 4;
+		top = bottom + 4;
 		let mut block = batoi(&ciphertext[bottom..top]);
 		decrypt_block(&mut block, sbox_index, key, shift);
 		let mut block = itoba(block);
-		for i in 0.. top - bottom {
+		for i in 0..4{
 			unsafe{*ciphertext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 		}
 	}
-	let leftover = ciphertext.len() % 4;
-	if leftover == 0 {
+	if ciphertext.len() - top == 0 {
 		return;
 	}
-	let bottom =  ciphertext.len() - leftover;
+	let bottom = top;
 	let sbox_index = bottom / 4 % NUM_SBOXES;
-	let top =  ciphertext.len() - 1;
+	let top = ciphertext.len();
 	let mut block = batoi(&ciphertext[bottom..top]);
 	decrypt_block(&mut block, sbox_index, key, shift);
 	let block = itoba(block);
+	println!("{:?}", block);
 	for i in 0..top - bottom {
 		unsafe{*ciphertext.get_unchecked_mut(bottom + i) = *block.get_unchecked(i);}
 	}
@@ -141,8 +142,6 @@ fn shift_right(block: &mut u32, count: usize) {
 fn shift_left(block: &mut u32, count: usize) {
 	*block = *block << count | *block >> (32 - count);
 }
-
-// value<<count | value>>(32-count);
 
 fn shift_type(key: u32) -> u8 {
 	(key >> 8 & 1) as u8
@@ -365,7 +364,7 @@ mod tests {
 	}
 
 	#[test]
-	fn encrypt_decrypt() {
+	fn encrypt_decrypt_file() {
 	    const ORIGINAL: &str = "/Users/chris/Documents/personal/rust/projects/bad_crypto/Cargo.toml";
 	    let mut plaintext = fs::read(ORIGINAL).unwrap();
 	    let original = plaintext.clone();
@@ -374,5 +373,49 @@ mod tests {
     	assert_ne!(plaintext, original);
     	decrypt(&mut plaintext, key);
     	assert_eq!(plaintext, original);
+	}
+
+	#[test]
+	fn encrypt_decrypt_divisible_fault() {
+	    let mut plaintext: std::vec::Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+	    let original = plaintext.clone();
+	    let key = 12345678;
+	    encrypt(&mut plaintext, key);
+	    assert_ne!(plaintext, original);
+	    decrypt(&mut plaintext, key);
+	    assert_eq!(plaintext, original);
+	}
+
+	#[test]
+	fn encrypt_decrypt_indivisible_fault_one_off() {
+	    let mut plaintext: std::vec::Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+	    let original = plaintext.clone();
+	    let key = 12345678;
+	    encrypt(&mut plaintext, key);
+	    assert_ne!(plaintext, original);
+	    decrypt(&mut plaintext, key);
+	    assert_eq!(plaintext, original);
+	}
+
+	#[test]
+	fn encrypt_decrypt_indivisible_fault_two_off() {
+	    let mut plaintext: std::vec::Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+	    let original = plaintext.clone();
+	    let key = 12345678;
+	    encrypt(&mut plaintext, key);
+	    assert_ne!(plaintext, original);
+	    decrypt(&mut plaintext, key);
+	    assert_eq!(plaintext, original);
+	}
+
+	#[test]
+	fn encrypt_decrypt_indivisible_fault_three_off() {
+	    let mut plaintext: std::vec::Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+	    let original = plaintext.clone();
+	    let key = 12345678;
+	    encrypt(&mut plaintext, key);
+	    assert_ne!(plaintext, original);
+	    decrypt(&mut plaintext, key);
+	    assert_eq!(plaintext, original);
 	}
 }

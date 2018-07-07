@@ -1,5 +1,4 @@
 use std::fs;
-use std::vec::Vec;
 
 extern crate time;
 extern crate bad_crypto;
